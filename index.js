@@ -2,35 +2,38 @@ require("dotenv").config();
 const http = require("http");
 const { Client, GatewayIntentBits } = require("discord.js");
 
+/* =======================
+   Discord Client
+======================= */
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
 });
 
-// ========= Keep-alive server (Render port binding) =========
+/* =======================
+   Keep-alive Server
+======================= */
 const PORT = process.env.PORT || 10000;
 http
   .createServer((req, res) => {
-    if (req.url === "/") {
+    if (req.url === "/" || req.url === "/healthz") {
       res.writeHead(200, { "Content-Type": "text/plain" });
       return res.end("OK");
     }
-    if (req.url === "/healthz") {
-      res.writeHead(200, { "Content-Type": "text/plain" });
-      return res.end("OK");
-    }
-    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.writeHead(404);
     res.end("Not Found");
   })
   .listen(PORT, () => {
     console.log(`Keep-alive server running on port ${PORT}`);
   });
 
-// ========= Office time settings =========
+/* =======================
+   Office Time Config
+======================= */
 const TIMEZONE = "Asia/Dhaka";
 const START_HOUR = 9;
-const START_MIN = 30; // 9:30
+const START_MIN = 30;
 const END_HOUR = 18;
-const END_MIN = 30; // 6:30
+const END_MIN = 30;
 
 function getDhakaTimeParts() {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -75,15 +78,15 @@ function buildMessage() {
 
 let lastSentKey = "";
 
-// ========= Slash command: /test =========
+/* =======================
+   Slash Command Register
+======================= */
 async function registerCommands() {
-  // Global command: সব server এ কাজ করবে, কিন্তু update হতে 5-60 min লাগতে পারে
-  // দ্রুত দেখতে চাইলে guild command করা লাগে, কিন্তু আপনার জন্য global রাখলাম।
   try {
     await client.application.commands.set([
       {
         name: "test",
-        description: "Send a test report message in the configured channel",
+        description: "Send a test report message",
       },
     ]);
     console.log("Slash command registered: /test");
@@ -92,10 +95,12 @@ async function registerCommands() {
   }
 }
 
-client.once("clientReady", async () => {
+/* =======================
+   Ready Event
+======================= */
+client.once("ready", async () => {
   console.log(`Bot logged in as ${client.user.tag}`);
 
-  // Presence (online দেখাতে)
   try {
     client.user.setPresence({
       activities: [{ name: "Hourly Task Report", type: 0 }],
@@ -105,10 +110,8 @@ client.once("clientReady", async () => {
     console.log("Presence error:", e);
   }
 
-  // Register /test
   await registerCommands();
 
-  // Startup test message (1 বার)
   try {
     const channel = await client.channels.fetch(process.env.CHANNEL_ID);
     if (channel) {
@@ -118,7 +121,6 @@ client.once("clientReady", async () => {
     console.log("Startup message error:", e);
   }
 
-  // প্রতি 20 সেকেন্ডে check, send হবে শুধু xx:30 এ
   setInterval(async () => {
     try {
       const { y, m, d, hh, mm } = getDhakaTimeParts();
@@ -140,29 +142,47 @@ client.once("clientReady", async () => {
   }, 20 * 1000);
 });
 
-// Handle /test interaction
+/* =======================
+   Slash Command Handler
+======================= */
 client.on("interactionCreate", async (interaction) => {
   try {
     if (!interaction.isChatInputCommand()) return;
     if (interaction.commandName !== "test") return;
 
+    await interaction.deferReply({ ephemeral: true });
+
     const channel = await client.channels.fetch(process.env.CHANNEL_ID);
     if (!channel) {
-      return interaction.reply({
-        content: "CHANNEL_ID wrong or bot has no access.",
-        ephemeral: true,
-      });
+      return interaction.editReply(
+        "CHANNEL_ID wrong or bot has no access."
+      );
     }
 
     await channel.send("🧪 Test message\n\n" + buildMessage());
-    await interaction.reply({ content: "Sent ✅", ephemeral: true });
+    await interaction.editReply("Sent ✅");
   } catch (e) {
-    try {
-      if (interaction.replied || interaction.deferred) return;
-      await interaction.reply({ content: "Error occurred.", ephemeral: true });
-    } catch {}
     console.log("Interaction error:", e);
+    try {
+      if (interaction.deferred) {
+        await interaction.editReply("Error occurred.");
+      } else if (!interaction.replied) {
+        await interaction.reply({
+          content: "Error occurred.",
+          ephemeral: true,
+        });
+      }
+    } catch {}
   }
 });
 
+/* =======================
+   Safety Logs
+======================= */
+process.on("unhandledRejection", console.error);
+process.on("uncaughtException", console.error);
+
+/* =======================
+   Login
+======================= */
 client.login(process.env.BOT_TOKEN);
